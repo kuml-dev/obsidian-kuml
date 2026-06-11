@@ -19,8 +19,16 @@ export default class KumlPlugin extends Plugin {
 
         const container = el.createDiv({ cls: "kuml-diagram" });
 
+        // ── Loading placeholder ───────────────────────────────────────────
+        const loading = container.createDiv({ cls: "kuml-loading" });
+        loading.createDiv({ cls: "kuml-spinner" });
+        loading.createSpan({ cls: "kuml-loading-text", text: "Rendering diagram…" });
+
         try {
           const svg = await renderKuml(trimmed, this.settings);
+
+          // Replace loading placeholder with rendered SVG
+          loading.remove();
           container.innerHTML = svg;
 
           // Make the SVG scale to container width
@@ -32,6 +40,9 @@ export default class KumlPlugin extends Plugin {
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
+
+          // Replace loading placeholder with error
+          loading.remove();
           container.addClass("kuml-error");
           container.createEl("strong", { text: "kUML render error" });
           container.createEl("pre", { text: msg });
