@@ -1,0 +1,33 @@
+.kuml-diagram {
+  display: flex;
+  justify-content: center;
+  padding: 1em 0;
+  overflow-x: auto;
+}
+
+.kuml-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.kuml-error {
+  background-color: var(--background-modifier-error);
+  border-left: 4px solid var(--color-red);
+  padding: 0.75em 1em;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.kuml-error strong {
+  display: block;
+  margin-bottom: 0.4em;
+  color: var(--color-red);
+}
+
+.kuml-error pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.85em;
+  color: var(--text-muted);
+}

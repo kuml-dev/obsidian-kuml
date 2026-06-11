@@ -1,0 +1,50 @@
+import { Plugin, MarkdownPostProcessorContext } from "obsidian";
+import { KumlSettings, DEFAULT_SETTINGS } from "./src/KumlSettings";
+import { KumlSettingsTab } from "./src/KumlSettingsTab";
+import { renderKuml } from "./src/KumlRenderer";
+
+export default class KumlPlugin extends Plugin {
+  settings!: KumlSettings;
+
+  async onload() {
+    await this.loadSettings();
+    this.addSettingTab(new KumlSettingsTab(this.app, this));
+
+    // registerMarkdownCodeBlockProcessor covers both Reading View and Live Preview.
+    this.registerMarkdownCodeBlockProcessor(
+      "kuml",
+      async (source: string, el: HTMLElement, _ctx: MarkdownPostProcessorContext) => {
+        const trimmed = source.trim();
+        if (!trimmed) return;
+
+        const container = el.createDiv({ cls: "kuml-diagram" });
+
+        try {
+          const svg = await renderKuml(trimmed, this.settings);
+          container.innerHTML = svg;
+
+          // Make the SVG scale to container width
+          const svgEl = container.querySelector("svg");
+          if (svgEl) {
+            svgEl.removeAttribute("width");
+            svgEl.removeAttribute("height");
+            svgEl.setAttribute("style", "width: 100%; height: auto; display: block;");
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          container.addClass("kuml-error");
+          container.createEl("strong", { text: "kUML render error" });
+          container.createEl("pre", { text: msg });
+        }
+      }
+    );
+  }
+
+  async loadSettings() {
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+  }
+
+  async saveSettings() {
+    await this.saveData(this.settings);
+  }
+}

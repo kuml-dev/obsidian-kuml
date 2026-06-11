@@ -1,0 +1,29 @@
+{
+  "name": "obsidian-kuml",
+  "version": "0.1.0",
+  "description": "Obsidian Community Plugin for kUML diagram rendering",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production"
+  },
+  "keywords": [
+    "obsidian",
+    "uml",
+    "kuml",
+    "diagrams",
+    "sysml"
+  ],
+  "author": "Irakli Betchvaia",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "builtin-modules": "^3.3.0",
+    "esbuild": "^0.21.5",
+    "obsidian": "latest",
+    "typescript": "^5.4.5"
+  },
+  "allowScripts": {
+    "esbuild@0.21.5": true
+  }
+}

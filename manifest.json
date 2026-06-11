@@ -1,0 +1,11 @@
+{
+  "id": "obsidian-kuml",
+  "name": "kUML Diagrams",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.3",
+  "description": "Render kUML diagram scripts as inline SVG in your notes.",
+  "author": "Irakli Betchvaia",
+  "authorUrl": "https://kuml.dev",
+  "fundingUrl": "https://kuml.dev",
+  "isDesktopOnly": false
+}
