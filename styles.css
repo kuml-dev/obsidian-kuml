@@ -10,6 +10,17 @@
   height: auto;
 }
 
+/* V0.2.4 — Applied via classList.add() in main.ts. The renderer-supplied SVG
+   has its width/height attributes stripped; this class restores responsive
+   block-level sizing. Kept separate from `.kuml-diagram svg` so that future
+   SVGs that are NOT rendered through our DOMParser pipeline are not affected
+   accidentally. */
+.kuml-diagram-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
 /* ── Loading placeholder ──────────────────────────────────────────────────── */
 
 .kuml-loading {

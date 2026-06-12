@@ -1,6 +1,8 @@
 import esbuild from "esbuild";
 import process from "process";
-import builtins from "builtin-modules";
+// V0.2.4 — Use Node's own list of builtin modules instead of the deprecated
+// `builtin-modules` npm package (flagged by the Obsidian plugin reviewer).
+import { builtinModules as builtins } from "node:module";
 
 const prod = process.argv[2] === "production";
 

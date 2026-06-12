@@ -33,13 +33,10 @@ export default class KumlPlugin extends Plugin {
         try {
           const svg = await renderKuml(trimmed, this.settings);
 
-          // V0.2.3 — Parse the SVG via DOMParser instead of `innerHTML = svg`,
-          // which Obsidian's plugin reviewer flags as an XSS vector. DOMParser
-          // builds a detached XML document; we strip any <script> elements as
-          // defence-in-depth and append the resulting <svg> root to the
-          // container. The rendered SVG comes from a trusted source the user
-          // controls (kuml-web server or kuml CLI), but the reviewer requires
-          // the safer pattern unconditionally.
+          // V0.2.4 — DOMParser pipeline: parses as image/svg+xml (detached XML
+          // document — never invokes the HTML parser), strips active content,
+          // then appendChild the root. Reviewer rejected raw HTML-string
+          // injection in 0.2.3; this is the portable safe equivalent.
           loading.remove();
 
           const parser = new DOMParser();
@@ -48,19 +45,21 @@ export default class KumlPlugin extends Plugin {
           if (parserError) {
             throw new Error(`Invalid SVG returned by renderer: ${parserError.textContent ?? "parse error"}`);
           }
-          // Defence-in-depth: drop any <script>/<foreignObject> embedded in
-          // the SVG response. The kUML renderer never emits these, but a
-          // compromised server in CLI/Server mode could.
+          // Defence-in-depth: drop active content. The kUML renderer never
+          // emits these, but a compromised CLI / server in the user's setup
+          // could.
           svgDoc.querySelectorAll("script, foreignObject").forEach((n) => n.remove());
 
           const svgEl = svgDoc.documentElement;
           container.appendChild(svgEl);
 
-          // Make the SVG scale to container width
+          // Make the SVG scale to container width via a CSS class — per
+          // reviewer "obsidianmd/no-static-styles-assignment", styling lives
+          // in styles.css under `.kuml-diagram-svg`.
           svgEl.removeAttribute("width");
           svgEl.removeAttribute("height");
-          svgEl.setAttribute("style", "width: 100%; height: auto; display: block;");
-        } catch (err) {
+          svgEl.classList.add("kuml-diagram-svg");
+        } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
 
           // Replace loading placeholder with error

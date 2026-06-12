@@ -1,3 +1,5 @@
+import { requestUrl, RequestUrlResponse } from "obsidian";
+
 /**
  * Renders a kUML script via the kuml-web REST API (kuml serve).
  *
@@ -11,6 +13,12 @@
  *     latex: string|null, durationMs: number, error: string|null }
  *
  * Valid themes: "plain" | "kuml" | "elegant" | "playful"  (NOT "default")
+ *
+ * V0.2.4 — Migrated from browser `fetch` to Obsidian's `requestUrl` per
+ * reviewer guidance: `requestUrl` bypasses Electron's CORS layer and works
+ * uniformly across desktop and mobile builds. Also switched the abort
+ * timeout to `window.setTimeout` / `window.clearTimeout` for popout window
+ * compatibility, and tightened the response typing so no `any` survives.
  */
 
 interface RenderResponse {
@@ -23,37 +31,69 @@ interface RenderResponse {
   error: string | null;
 }
 
+/** Narrow JSON value type — anything we'd see from kuml-web's structured response. */
+type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]: JsonValue };
+
+function isRenderResponse(v: JsonValue): v is RenderResponse & JsonValue {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const o = v as Record<string, JsonValue>;
+  return (
+    typeof o.ok === "boolean" &&
+    typeof o.format === "string" &&
+    (typeof o.svg === "string" || o.svg === null) &&
+    (typeof o.pngBase64 === "string" || o.pngBase64 === null) &&
+    (typeof o.latex === "string" || o.latex === null) &&
+    typeof o.durationMs === "number" &&
+    (typeof o.error === "string" || o.error === null)
+  );
+}
+
 export async function renderViaServer(source: string, serverUrl: string): Promise<string> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
+  // Build a manual abort timer using `window.setTimeout` (popout-safe). Obsidian's
+  // requestUrl doesn't support AbortSignal, so we race it against a timeout.
+  let timeoutHandle: number | undefined;
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    timeoutHandle = window.setTimeout(
+      () => reject(new Error("kuml-web request timed out after 10s")),
+      10_000,
+    );
+  });
 
-  let response: Response;
+  let response: RequestUrlResponse;
   try {
-    response = await fetch(`${serverUrl}/api/render`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        script: source,   // field name is "script", not "source"
-        format: "svg",
-        theme: "plain",   // valid values: plain | kuml | elegant | playful
-        layout: "auto",
+    response = await Promise.race([
+      requestUrl({
+        url: `${serverUrl}/api/render`,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          script: source,
+          format: "svg",
+          theme: "plain",
+          layout: "auto",
+        }),
+        // We handle non-2xx ourselves so the error includes the body text.
+        throw: false,
       }),
-      signal: controller.signal,
-    });
+      timeoutPromise,
+    ]);
   } finally {
-    clearTimeout(timeout);
+    if (timeoutHandle !== undefined) window.clearTimeout(timeoutHandle);
   }
 
-  if (!response.ok) {
-    const text = await response.text().catch(() => response.statusText);
-    throw new Error(`kuml-web responded ${response.status}: ${text.slice(0, 300)}`);
+  if (response.status < 200 || response.status >= 300) {
+    const snippet = (response.text ?? "").slice(0, 300);
+    throw new Error(`kuml-web responded ${response.status}: ${snippet}`);
   }
 
-  const data: RenderResponse = await response.json();
-
-  if (!data.ok || !data.svg) {
-    throw new Error(`kuml-web render failed: ${data.error ?? "unknown error"}`);
+  const json: JsonValue = response.json as JsonValue;
+  if (!isRenderResponse(json)) {
+    throw new Error("kuml-web response did not match the expected schema");
   }
 
-  return data.svg;
+  if (!json.ok || !json.svg) {
+    throw new Error(`kuml-web render failed: ${json.error ?? "unknown error"}`);
+  }
+
+  return json.svg;
 }

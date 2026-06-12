@@ -1,5 +1,4 @@
 import { StreamLanguage, StreamParser } from "@codemirror/language";
-import { tags as t } from "@lezer/highlight";
 
 /**
  * CodeMirror 6 StreamLanguage for kUML DSL (`.kuml.kts` syntax).
