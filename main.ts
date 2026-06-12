@@ -73,7 +73,14 @@ export default class KumlPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    // V0.2.5 — `Plugin.loadData()` is declared `Promise<any>` in the Obsidian
+    // types, so the previous `Object.assign({}, DEFAULTS, await loadData())`
+    // spread propagated `any` into `this.settings`. We narrow the value to
+    // `Partial<KumlSettings>` after the load and let Object.assign produce a
+    // typed result. Unknown fields in the persisted JSON are ignored — only
+    // keys we know about are picked up by Partial<KumlSettings>.
+    const persisted = (await this.loadData()) as Partial<KumlSettings> | null;
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, persisted ?? {});
   }
 
   async saveSettings() {

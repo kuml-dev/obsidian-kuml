@@ -14,15 +14,15 @@ export class KumlSettingsTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    // V0.2.4 — Use Setting().setHeading() instead of a bare <h2> per Obsidian
-    // reviewer guidance ("For a consistent UI use new Setting(containerEl)…").
-    new Setting(containerEl)
-      .setName("kUML Diagrams")
-      .setDesc(
+    // V0.2.5 — No top heading: Obsidian shows the plugin name in the tab
+    // header automatically, and the reviewer rejects headings that include
+    // the plugin name. A plain description paragraph carries the intro text.
+    containerEl.createEl("p", {
+      text:
         "Renders kuml code blocks as inline SVG diagrams. " +
-          "Diagrams are evaluated by kuml-web (server) or the kuml CLI binary.",
-      )
-      .setHeading();
+        "Diagrams are evaluated by the kuml-web server or the kuml CLI binary.",
+      cls: "setting-item-description",
+    });
 
     // ── Render mode ────────────────────────────────────────────────────────────
     new Setting(containerEl)
