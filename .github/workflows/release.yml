@@ -9,6 +9,12 @@ on:
 
 permissions:
   contents: write
+  # V0.2.2 — required for actions/attest-build-provenance to sign the release
+  # assets so users can cryptographically verify they were built from this repo.
+  # Closes the Obsidian submission Recommendation:
+  # "Missing GitHub artifact attestations for release assets"
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -38,6 +44,14 @@ jobs:
             echo "ERROR: main.js > 500 KB — @codemirror/* may have been bundled"
             exit 1
           fi
+
+      - name: Generate build provenance attestations
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            main.js
+            manifest.json
+            styles.css
 
       - name: Create GitHub release
         env:
