@@ -17,6 +17,8 @@
   "author": "Irakli Betchvaia",
   "license": "Apache-2.0",
   "devDependencies": {
+    "@codemirror/language": "^6.12.3",
+    "@lezer/highlight": "^1.2.3",
     "@types/node": "^20.14.0",
     "builtin-modules": "^3.3.0",
     "esbuild": "^0.21.5",

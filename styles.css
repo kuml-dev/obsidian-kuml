@@ -62,3 +62,34 @@
   font-size: 0.85em;
   color: var(--text-muted);
 }
+
+/* ── Syntax highlighting for ```kuml code fences (V0.2.0) ─────────────────── */
+/* Uses Obsidian CSS variables so colours respect light/dark theme. */
+
+.cm-kuml-keyword {
+  color: var(--code-keyword);
+  font-weight: 500;
+}
+
+.cm-kuml-string {
+  color: var(--code-string);
+}
+
+.cm-kuml-comment {
+  color: var(--code-comment);
+  font-style: italic;
+}
+
+.cm-kuml-number {
+  color: var(--code-value);
+}
+
+/* kUML DSL builder functions: umlModel, classOf, component, etc. */
+.cm-kuml-builtin {
+  color: var(--code-function);
+}
+
+/* Stereotypes «…» and annotations @Foo */
+.cm-kuml-meta {
+  color: var(--code-tag);
+}

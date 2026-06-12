@@ -2,6 +2,7 @@ import { Plugin, MarkdownPostProcessorContext } from "obsidian";
 import { KumlSettings, DEFAULT_SETTINGS } from "./src/KumlSettings";
 import { KumlSettingsTab } from "./src/KumlSettingsTab";
 import { renderKuml } from "./src/KumlRenderer";
+import { kumlHighlightExtension } from "./src/KumlHighlight";
 
 export default class KumlPlugin extends Plugin {
   settings!: KumlSettings;
@@ -9,6 +10,11 @@ export default class KumlPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
     this.addSettingTab(new KumlSettingsTab(this.app, this));
+
+    // V0.2.0 — Syntax highlighting for ```kuml code fences in Source Mode
+    // and Live Preview. Reading View SVG rendering continues to be handled
+    // by the MarkdownPostProcessor registered below (unchanged from v0.1.0).
+    this.registerEditorExtension(kumlHighlightExtension);
 
     // registerMarkdownCodeBlockProcessor covers both Reading View and Live Preview.
     this.registerMarkdownCodeBlockProcessor(
