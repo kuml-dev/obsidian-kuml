@@ -33,17 +33,33 @@ export default class KumlPlugin extends Plugin {
         try {
           const svg = await renderKuml(trimmed, this.settings);
 
-          // Replace loading placeholder with rendered SVG
+          // V0.2.3 — Parse the SVG via DOMParser instead of `innerHTML = svg`,
+          // which Obsidian's plugin reviewer flags as an XSS vector. DOMParser
+          // builds a detached XML document; we strip any <script> elements as
+          // defence-in-depth and append the resulting <svg> root to the
+          // container. The rendered SVG comes from a trusted source the user
+          // controls (kuml-web server or kuml CLI), but the reviewer requires
+          // the safer pattern unconditionally.
           loading.remove();
-          container.innerHTML = svg;
+
+          const parser = new DOMParser();
+          const svgDoc = parser.parseFromString(svg, "image/svg+xml");
+          const parserError = svgDoc.querySelector("parsererror");
+          if (parserError) {
+            throw new Error(`Invalid SVG returned by renderer: ${parserError.textContent ?? "parse error"}`);
+          }
+          // Defence-in-depth: drop any <script>/<foreignObject> embedded in
+          // the SVG response. The kUML renderer never emits these, but a
+          // compromised server in CLI/Server mode could.
+          svgDoc.querySelectorAll("script, foreignObject").forEach((n) => n.remove());
+
+          const svgEl = svgDoc.documentElement;
+          container.appendChild(svgEl);
 
           // Make the SVG scale to container width
-          const svgEl = container.querySelector("svg");
-          if (svgEl) {
-            svgEl.removeAttribute("width");
-            svgEl.removeAttribute("height");
-            svgEl.setAttribute("style", "width: 100%; height: auto; display: block;");
-          }
+          svgEl.removeAttribute("width");
+          svgEl.removeAttribute("height");
+          svgEl.setAttribute("style", "width: 100%; height: auto; display: block;");
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
 
