@@ -5,8 +5,8 @@ import { Platform } from "obsidian";
  *
  * Desktop-only — relies on Node.js builtins (child_process / fs / os / path)
  * that do not exist in the mobile (Capacitor) runtime. Every call site is
- * guarded by `Platform.isDesktopApp`; the imports themselves are dynamic so
- * the mobile bundle does not even try to resolve the Node modules.
+ * guarded by `Platform.isDesktopApp`; the built-in modules are loaded lazily
+ * via require() so the mobile bundle never attempts to resolve them.
  *
  * Strategy (avoids /dev/stdout which Electron child processes cannot open):
  *   1. Write source to  /tmp/kuml-obsidian-<ts>-in.kuml.kts
@@ -16,25 +16,32 @@ import { Platform } from "obsidian";
  *
  * Stderr (JNA / Unsafe warnings) is filtered before showing errors to the user.
  *
- * V0.2.4 — switched from CommonJS-style imports to ES dynamic imports
- * (`await import(...)`), dropping the disable comments flagged by the
- * Obsidian plugin reviewer. The Node builtins remain external to the
- * esbuild bundle.
+ * V0.2.5 — reverted dynamic import() back to require()-based loading.
+ * esbuild (format: "cjs") does NOT transform `await import("child_process")`
+ * to require() for external modules — it leaves the call as a native ES
+ * dynamic import, which Electron's browser-side ESM resolver intercepts and
+ * fails with "Failed to resolve module specifier 'child_process'".
+ * Solution: eval("require") bypasses both TypeScript's ESM type context and
+ * esbuild's static analysis, while resolving correctly via Node/Electron's
+ * CommonJS require() at runtime.
  */
 export async function renderViaCli(source: string, cliPath: string): Promise<string> {
   if (!Platform.isDesktopApp) {
     throw new Error("CLI rendering is only available on desktop. Use server mode for mobile.");
   }
 
-  // Lazy ESM imports of Node built-ins. esbuild leaves these external (see
-  // `external` list in esbuild.config.mjs); they resolve at runtime via
-  // Electron's Node integration. Imports are dynamic so the mobile bundle
-  // never attempts to load them — the function above bails on non-desktop
-  // before this point is reached.
-  const childProcess = await import("child_process");
-  const fs = await import("fs");
-  const os = await import("os");
-  const path = await import("path");
+  // eval("require") is the canonical Obsidian-plugin pattern for accessing
+  // Node built-ins from a CJS bundle without triggering Electron's browser-side
+  // ESM resolver. `require` is in scope at runtime (esbuild CJS wrapper), but
+  // TypeScript's ESNext module type-context doesn't know it — eval() bridges
+  // that gap without disable comments or static imports that would run at
+  // module-load time (and fail on mobile).
+  // eslint-disable-next-line no-eval
+  const req = eval("require") as NodeRequire;
+  const childProcess = req("child_process") as typeof import("child_process");
+  const fs = req("fs") as typeof import("fs");
+  const os = req("os") as typeof import("os");
+  const path = req("path") as typeof import("path");
 
   const ts = Date.now();
   const tmpDir = os.tmpdir();
