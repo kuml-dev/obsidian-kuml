@@ -3,6 +3,8 @@
 Render [kUML](https://kuml.dev) diagram scripts as inline SVG in your Obsidian notes.  
 Supports UML class diagrams, C4 architecture diagrams, and SysML 2 diagrams — with syntax highlighting in the editor.
 
+**Project:** [kuml.dev](https://kuml.dev) · [Handbook](https://docs.kuml.dev) · [Source](https://github.com/kuml-dev/kUML)
+
 ## What it looks like
 
 Write a fenced code block tagged `kuml`:
@@ -96,7 +98,7 @@ Any fenced code block tagged `` ```kuml `` is processed:
 | SysML 2 BDD | `sysml2Model { partDef("Vehicle") … }` |
 | SysML 2 + others | all 8 SysML 2 diagram types supported |
 
-Full DSL reference: [kuml.dev/docs](https://kuml.dev/docs)
+Full DSL reference: [docs.kuml.dev](https://docs.kuml.dev)
 
 ## Troubleshooting
 
