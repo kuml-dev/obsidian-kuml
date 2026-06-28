@@ -1,6 +1,35 @@
 import { Platform } from "obsidian";
 
 /**
+ * Monotonically increasing counter to guarantee unique temp-file names even
+ * when multiple kuml blocks in the same note are rendered concurrently.
+ *
+ * Problem: Date.now() has only millisecond resolution. When a note is opened
+ * with N kuml blocks, Obsidian schedules all N render calls in the same event-
+ * loop tick → all N calls get the *same* timestamp → same filenames → race:
+ *   - Call A writes inFile, Call B overwrites inFile
+ *   - Both CLIs finish, last writer wins for outFile
+ *   - The "losing" call's finally{} deletes outFile before the winner reads it
+ *   → ENOENT: "kuml CLI: could not read output file"
+ *
+ * Fix: combine Date.now() (for human-readable debugging) with an atomic
+ * per-module sequence number so concurrent calls always get distinct paths.
+ */
+let _renderSeq = 0;
+
+/** Options for animated SVG rendering. */
+export interface AnimatedRenderOptions {
+  /** Emit SMIL-animated SVG (kuml render --animated). */
+  animated: true;
+  /**
+   * Absolute path to a kuml.trace.v1 JSON file for trace-driven animation.
+   * When omitted, a synthesised demo animation is produced (STM/Activity only;
+   * BPMN renders static with a CLI warning when no trace is supplied).
+   */
+  tracePath?: string;
+}
+
+/**
  * Renders a kUML script by invoking the kUML CLI binary.
  *
  * Desktop-only — relies on Node.js builtins (child_process / fs / os / path)
@@ -9,23 +38,22 @@ import { Platform } from "obsidian";
  * via require() so the mobile bundle never attempts to resolve them.
  *
  * Strategy (avoids /dev/stdout which Electron child processes cannot open):
- *   1. Write source to  /tmp/kuml-obsidian-<ts>-in.kuml.kts
- *   2. Run: kuml render --format svg -o /tmp/kuml-obsidian-<ts>-out.svg <inFile>
+ *   1. Write source to  /tmp/kuml-obsidian-<ts>-<seq>-in.kuml.kts
+ *   2. Run: kuml render --format svg [--animated [--trace <path>]]
+ *           -o /tmp/kuml-obsidian-<ts>-<seq>-out.svg <inFile>
  *   3. Read the output file → return SVG string
  *   4. Delete both temp files (best-effort)
  *
  * Stderr (JNA / Unsafe warnings) is filtered before showing errors to the user.
  *
+ * V0.3.0 — added `animatedOptions` for kuml-animated code fence support.
  * V0.2.5 — reverted dynamic import() back to require()-based loading.
- * esbuild (format: "cjs") does NOT transform `await import("child_process")`
- * to require() for external modules — it leaves the call as a native ES
- * dynamic import, which Electron's browser-side ESM resolver intercepts and
- * fails with "Failed to resolve module specifier 'child_process'".
- * Solution: eval("require") bypasses both TypeScript's ESM type context and
- * esbuild's static analysis, while resolving correctly via Node/Electron's
- * CommonJS require() at runtime.
  */
-export async function renderViaCli(source: string, cliPath: string): Promise<string> {
+export async function renderViaCli(
+  source: string,
+  cliPath: string,
+  animatedOptions?: AnimatedRenderOptions,
+): Promise<string> {
   if (!Platform.isDesktopApp) {
     throw new Error("CLI rendering is only available on desktop. Use server mode for mobile.");
   }
@@ -44,9 +72,10 @@ export async function renderViaCli(source: string, cliPath: string): Promise<str
   const path = req("path") as typeof import("path");
 
   const ts = Date.now();
+  const seq = _renderSeq++;
   const tmpDir = os.tmpdir();
-  const inFile = path.join(tmpDir, `kuml-obsidian-${ts}-in.kuml.kts`);
-  const outFile = path.join(tmpDir, `kuml-obsidian-${ts}-out.svg`);
+  const inFile = path.join(tmpDir, `kuml-obsidian-${ts}-${seq}-in.kuml.kts`);
+  const outFile = path.join(tmpDir, `kuml-obsidian-${ts}-${seq}-out.svg`);
 
   // Write source to temp input file
   try {
@@ -56,10 +85,20 @@ export async function renderViaCli(source: string, cliPath: string): Promise<str
     throw new Error(`kuml CLI: could not write temp file: ${msg}`);
   }
 
+  // Build CLI argument list — base args + optional animated flags
+  const cliArgs = ["render", "--format", "svg"];
+  if (animatedOptions?.animated) {
+    cliArgs.push("--animated");
+    if (animatedOptions.tracePath) {
+      cliArgs.push(`--trace=${animatedOptions.tracePath}`);
+    }
+  }
+  cliArgs.push("-o", outFile, inFile);
+
   return new Promise<string>((resolve, reject) => {
     childProcess.execFile(
       cliPath,
-      ["render", "--format", "svg", "-o", outFile, inFile],
+      cliArgs,
       { timeout: 30_000, maxBuffer: 5 * 1024 * 1024 },
       (error, _stdout, stderr) => {
         // Clean up input file (best-effort)

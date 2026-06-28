@@ -1,9 +1,9 @@
 {
   "id": "kuml",
   "name": "kUML Diagrams",
-  "version": "0.2.6",
+  "version": "0.3.0",
   "minAppVersion": "1.5.3",
-  "description": "Render kUML diagram scripts (UML, C4, SysML 2) as inline SVG with syntax highlighting.",
+  "description": "Render kUML diagram scripts (UML, C4, SysML 2) as inline SVG with syntax highlighting. Animated SMIL rendering via kuml-animated code fences.",
   "author": "Irakli Betchvaia",
   "authorUrl": "https://kuml.dev",
   "isDesktopOnly": false
