@@ -12,7 +12,7 @@ import { requestUrl, RequestUrlResponse } from "obsidian";
  *   { ok: boolean, format: string, svg: string|null, pngBase64: string|null,
  *     latex: string|null, durationMs: number, error: string|null }
  *
- * Valid themes: "plain" | "kuml" | "elegant" | "playful"  (NOT "default")
+ * Valid themes: "kuml" | "plain" | "elegant" | "playful"  (NOT "default")
  *
  * V0.2.4 — Migrated from browser `fetch` to Obsidian's `requestUrl` per
  * reviewer guidance: `requestUrl` bypasses Electron's CORS layer and works
@@ -69,7 +69,7 @@ export async function renderViaServer(source: string, serverUrl: string): Promis
         body: JSON.stringify({
           script: source,
           format: "svg",
-          theme: "plain",
+          theme: "kuml",
           layout: "auto",
         }),
         // We handle non-2xx ourselves so the error includes the body text.
