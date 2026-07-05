@@ -74,6 +74,36 @@
   color: var(--text-muted);
 }
 
+/* ── Click-to-zoom / Lightbox (V0.4.0) ───────────────────────────────────── */
+
+/* Cursor hint: the diagram is clickable. */
+.kuml-diagram--zoomable {
+  cursor: zoom-in;
+}
+
+/* Override Obsidian's default modal max-width so large diagrams have room. */
+.kuml-zoom-modal.modal {
+  width: min(92vw, 1800px);
+  max-width: min(92vw, 1800px);
+}
+
+/* Scrollable content area — SVG is never clipped, just scrolled if needed. */
+.kuml-zoom-content {
+  overflow: auto;
+  padding: 0.5em;
+  display: flex;
+  justify-content: center;
+}
+
+/* SVG fills the modal width; height is proportional, capped at ~85 % of the
+   viewport so the modal close button remains reachable. */
+.kuml-zoom-content svg {
+  width: 100%;
+  height: auto;
+  max-height: 85vh;
+  display: block;
+}
+
 /* ── Syntax highlighting for ```kuml code fences (V0.2.0) ─────────────────── */
 /* Uses Obsidian CSS variables so colours respect light/dark theme. */
 

@@ -1,4 +1,4 @@
-import { FileSystemAdapter, Plugin, MarkdownPostProcessorContext } from "obsidian";
+import { App, FileSystemAdapter, Modal, Plugin, MarkdownPostProcessorContext } from "obsidian";
 import { KumlSettings, DEFAULT_SETTINGS } from "./src/KumlSettings";
 import { KumlSettingsTab } from "./src/KumlSettingsTab";
 import { renderKuml } from "./src/KumlRenderer";
@@ -65,6 +65,37 @@ function injectSvg(svg: string, container: HTMLElement): void {
   svgEl.removeAttribute("width");
   svgEl.removeAttribute("height");
   svgEl.classList.add("kuml-diagram-svg");
+}
+
+/**
+ * Lightbox modal that displays a kUML diagram SVG at full width.
+ *
+ * Opens when the user clicks on any rendered diagram. Obsidian's Modal base
+ * class handles Escape-to-close and click-on-backdrop-to-close automatically.
+ *
+ * V0.4.0
+ */
+class KumlZoomModal extends Modal {
+  private readonly svgClone: SVGElement;
+
+  constructor(app: App, svgEl: SVGElement) {
+    super(app);
+    this.svgClone = svgEl.cloneNode(true) as SVGElement;
+  }
+
+  onOpen(): void {
+    this.modalEl.addClass("kuml-zoom-modal");
+    this.contentEl.addClass("kuml-zoom-content");
+    // Strip inline sizing so the modal CSS takes full control.
+    this.svgClone.removeAttribute("width");
+    this.svgClone.removeAttribute("height");
+    this.svgClone.removeAttribute("style");
+    this.contentEl.appendChild(this.svgClone);
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
 }
 
 export default class KumlPlugin extends Plugin {
@@ -146,6 +177,15 @@ export default class KumlPlugin extends Plugin {
       // not inside a sandboxed <img> or external resource reference).
       loading.remove();
       injectSvg(svg, container);
+
+      // V0.4.0 — Click-to-zoom: clicking the diagram opens it in a lightbox.
+      const svgEl = container.querySelector<SVGElement>("svg");
+      if (svgEl) {
+        container.addClass("kuml-diagram--zoomable");
+        container.addEventListener("click", () => {
+          new KumlZoomModal(this.app, svgEl).open();
+        });
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       loading.remove();
