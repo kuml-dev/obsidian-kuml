@@ -1,4 +1,12 @@
-import { App, FileSystemAdapter, Modal, Plugin, MarkdownPostProcessorContext } from "obsidian";
+import {
+  App,
+  FileSystemAdapter,
+  Modal,
+  Plugin,
+  MarkdownPostProcessorContext,
+  setIcon,
+  setTooltip,
+} from "obsidian";
 import { KumlSettings, DEFAULT_SETTINGS } from "./src/KumlSettings";
 import { KumlSettingsTab } from "./src/KumlSettingsTab";
 import { renderKuml } from "./src/KumlRenderer";
@@ -78,7 +86,40 @@ function injectSvg(svg: string, container: HTMLElement): void {
 class KumlZoomModal extends Modal {
   private readonly svgClone: SVGElement;
 
-  constructor(app: App, svgEl: SVGElement) {
+  // ── Zoom/pan state ────────────────────────────────────────────────────
+  private scale = 1; // current zoom factor; 1 == fit-to-container baseline
+  private translateX = 0; // pan offset in px (post-scale, applied to stage)
+  private translateY = 0;
+  private isPanning = false;
+  private panStartX = 0; // pointer clientX at drag start
+  private panStartY = 0;
+  private panOriginX = 0; // translateX at drag start
+  private panOriginY = 0;
+
+  private readonly MIN_SCALE = 0.25;
+  private readonly MAX_SCALE = 4;
+  private readonly ZOOM_STEP = 1.2; // multiplicative per button click / wheel notch
+
+  // ── DOM refs ──────────────────────────────────────────────────────────
+  private viewportEl!: HTMLDivElement; // clips + is the pan surface (overflow:hidden)
+  private stageEl!: HTMLDivElement; // transformed wrapper holding the SVG
+  private toolbarEl!: HTMLDivElement;
+
+  // ── Bound listener refs (needed so removeEventListener works) ──────────
+  private onWheelBound = (e: WheelEvent) => this.handleWheel(e);
+  private onPointerDownBound = (e: PointerEvent) => this.handlePointerDown(e);
+  private onPointerMoveBound = (e: PointerEvent) => this.handlePointerMove(e);
+  private onPointerUpBound = (e: PointerEvent) => this.handlePointerUp(e);
+
+  // ── Download bookkeeping ─────────────────────────────────────────────
+  private downloadCounter = 0; // increments per download to avoid filename collisions
+  private readonly liveObjectUrls = new Set<string>(); // any not-yet-revoked URLs
+
+  constructor(
+    app: App,
+    svgEl: SVGElement,
+    private readonly fileBaseName: string,
+  ) {
     super(app);
     this.svgClone = svgEl.cloneNode(true) as SVGElement;
   }
@@ -86,15 +127,333 @@ class KumlZoomModal extends Modal {
   onOpen(): void {
     this.modalEl.addClass("kuml-zoom-modal");
     this.contentEl.addClass("kuml-zoom-content");
-    // Strip inline sizing so the modal CSS takes full control.
+
+    // Toolbar (sticky top bar).
+    this.toolbarEl = this.contentEl.createDiv({ cls: "kuml-zoom-toolbar" });
+    this.buildToolbar();
+
+    // Viewport clips; stage is the transform target.
+    this.viewportEl = this.contentEl.createDiv({ cls: "kuml-zoom-viewport" });
+    this.stageEl = this.viewportEl.createDiv({ cls: "kuml-zoom-stage" });
+
+    // Strip inline sizing so our CSS/transform fully controls layout.
     this.svgClone.removeAttribute("width");
     this.svgClone.removeAttribute("height");
     this.svgClone.removeAttribute("style");
-    this.contentEl.appendChild(this.svgClone);
+    this.svgClone.addClass("kuml-zoom-svg");
+    this.stageEl.appendChild(this.svgClone);
+
+    // Interaction listeners live on the viewport (pan/zoom surface).
+    this.viewportEl.addEventListener("wheel", this.onWheelBound, { passive: false });
+    this.viewportEl.addEventListener("pointerdown", this.onPointerDownBound);
+    this.viewportEl.addEventListener("pointermove", this.onPointerMoveBound);
+    this.viewportEl.addEventListener("pointerup", this.onPointerUpBound);
+    this.viewportEl.addEventListener("pointercancel", this.onPointerUpBound);
+
+    // Start at fit.
+    this.zoomFit();
   }
 
   onClose(): void {
+    // Remove interaction listeners (viewportEl may be undefined if open failed early — guard).
+    if (this.viewportEl) {
+      this.viewportEl.removeEventListener("wheel", this.onWheelBound);
+      this.viewportEl.removeEventListener("pointerdown", this.onPointerDownBound);
+      this.viewportEl.removeEventListener("pointermove", this.onPointerMoveBound);
+      this.viewportEl.removeEventListener("pointerup", this.onPointerUpBound);
+      this.viewportEl.removeEventListener("pointercancel", this.onPointerUpBound);
+    }
+    // Revoke any object URLs still outstanding (belt-and-suspenders; each download revokes its own).
+    this.liveObjectUrls.forEach((url) => URL.revokeObjectURL(url));
+    this.liveObjectUrls.clear();
+
+    this.isPanning = false;
     this.contentEl.empty();
+  }
+
+  // ── Toolbar ───────────────────────────────────────────────────────────
+
+  private buildToolbar(): void {
+    const mkBtn = (
+      icon: string,
+      tooltip: string,
+      fallbackLabel: string,
+      onClick: () => void,
+    ): HTMLButtonElement => {
+      const btn = this.toolbarEl.createEl("button", { cls: "kuml-zoom-btn" });
+      setIcon(btn, icon);
+      setTooltip(btn, tooltip, { placement: "bottom" });
+      btn.setAttribute("aria-label", tooltip);
+      if (btn.childElementCount === 0) {
+        btn.setText(fallbackLabel);
+      }
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation(); // don't let clicks bubble to any backdrop handler
+        onClick();
+      });
+      return btn;
+    };
+
+    mkBtn("zoom-in", "Zoom in", "+", () => this.zoomIn());
+    mkBtn("zoom-out", "Zoom out", "−", () => this.zoomOut());
+    mkBtn("maximize", "Fit to window", "Fit", () => this.zoomFit()); // "maximize" lucide icon == fit
+    // Visual separator
+    this.toolbarEl.createDiv({ cls: "kuml-zoom-toolbar-sep" });
+    mkBtn("download", "Download SVG", "SVG", () => this.downloadSvg());
+    mkBtn("image-down", "Download PNG", "PNG", () => this.downloadPng());
+  }
+
+  // ── Zoom + pan math ───────────────────────────────────────────────────
+
+  private applyTransform(): void {
+    // Cursor: grab only when panning is possible (zoomed past fit).
+    const canPan = this.scale > 1.0001;
+    if (!canPan) {
+      // Snap back to centered/no-offset at fit so we never leave a diagram parked
+      // off-screen. Must happen *before* writing style.transform below, otherwise
+      // the DOM keeps rendering the stale (pre-reset) offset while our internal
+      // state already believes translateX/translateY are 0 — the next zoom/pan
+      // action would then compute its pivot math from that wrong baseline.
+      this.translateX = 0;
+      this.translateY = 0;
+    }
+    this.stageEl.style.transform = `translate(${this.translateX}px, ${this.translateY}px) scale(${this.scale})`;
+    this.viewportEl.toggleClass("kuml-zoom-pannable", canPan);
+  }
+
+  private clampScale(s: number): number {
+    return Math.min(this.MAX_SCALE, Math.max(this.MIN_SCALE, s));
+  }
+
+  private zoomTo(newScale: number, pivotClientX?: number, pivotClientY?: number): void {
+    const prev = this.scale;
+    const next = this.clampScale(newScale);
+    if (next === prev) return;
+
+    // Zoom around a pivot (pointer position) so wheel-zoom feels anchored.
+    // If no pivot given (button click), pivot on viewport center.
+    const rect = this.viewportEl.getBoundingClientRect();
+    const px = (pivotClientX ?? rect.left + rect.width / 2) - rect.left;
+    const py = (pivotClientY ?? rect.top + rect.height / 2) - rect.top;
+
+    // Keep the point under the pivot fixed: solve for new translate.
+    // stagePoint = (pivot - translate) / prevScale ; new translate = pivot - stagePoint*next
+    const stageX = (px - this.translateX) / prev;
+    const stageY = (py - this.translateY) / prev;
+    this.scale = next;
+    this.translateX = px - stageX * next;
+    this.translateY = py - stageY * next;
+    this.applyTransform();
+  }
+
+  private zoomIn(): void {
+    this.zoomTo(this.scale * this.ZOOM_STEP);
+  }
+
+  private zoomOut(): void {
+    this.zoomTo(this.scale / this.ZOOM_STEP);
+  }
+
+  private zoomFit(): void {
+    this.scale = 1;
+    this.translateX = 0;
+    this.translateY = 0;
+    this.applyTransform();
+  }
+
+  private handleWheel(e: WheelEvent): void {
+    // At/under fit level (not pannable) the viewport may still genuinely
+    // overflow — e.g. a tall diagram whose max-height:85vh cap exceeds the
+    // space left below the toolbar. styles.css falls back to native
+    // `overflow: auto` scrolling for exactly that case
+    // (`.kuml-zoom-viewport:not(.kuml-zoom-pannable)`), but that fallback is
+    // unreachable if we unconditionally hijack every wheel notch for zoom.
+    // So: when not zoomed past fit AND there's real overflow to scroll,
+    // let the wheel event scroll natively instead of zooming — unless the
+    // user is explicitly asking to zoom (Ctrl/Cmd+wheel, the standard
+    // trackpad-pinch-to-zoom signal in Chromium).
+    const canPan = this.scale > 1.0001;
+    if (!canPan && !e.ctrlKey && !e.metaKey) {
+      const hasOverflow =
+        this.viewportEl.scrollHeight > this.viewportEl.clientHeight + 1 ||
+        this.viewportEl.scrollWidth > this.viewportEl.clientWidth + 1;
+      if (hasOverflow) {
+        return; // don't preventDefault — allow native scroll
+      }
+    }
+    e.preventDefault(); // stop the modal/page from scrolling
+    const dir = e.deltaY < 0 ? this.ZOOM_STEP : 1 / this.ZOOM_STEP;
+    this.zoomTo(this.scale * dir, e.clientX, e.clientY);
+  }
+
+  private handlePointerDown(e: PointerEvent): void {
+    if (this.scale <= 1.0001) return; // no pan at/under fit
+    if (e.button !== 0) return; // left button / primary only
+    this.isPanning = true;
+    this.panStartX = e.clientX;
+    this.panStartY = e.clientY;
+    this.panOriginX = this.translateX;
+    this.panOriginY = this.translateY;
+    this.viewportEl.setPointerCapture(e.pointerId); // keep receiving moves outside the modal
+    this.viewportEl.addClass("kuml-zoom-panning"); // cursor: grabbing
+    e.preventDefault();
+  }
+
+  private handlePointerMove(e: PointerEvent): void {
+    if (!this.isPanning) return;
+    this.translateX = this.panOriginX + (e.clientX - this.panStartX);
+    this.translateY = this.panOriginY + (e.clientY - this.panStartY);
+    this.applyTransform();
+  }
+
+  private handlePointerUp(e: PointerEvent): void {
+    if (!this.isPanning) return;
+    this.isPanning = false;
+    this.viewportEl.removeClass("kuml-zoom-panning");
+    try {
+      this.viewportEl.releasePointerCapture(e.pointerId);
+    } catch {
+      /* already released */
+    }
+  }
+
+  // ── Downloads ─────────────────────────────────────────────────────────
+
+  private nextFileName(ext: string): string {
+    this.downloadCounter += 1;
+    const base = this.fileBaseName && this.fileBaseName.length ? this.fileBaseName : "kuml-diagram";
+    const suffix = this.downloadCounter > 1 ? `-${this.downloadCounter}` : "";
+    return `${base}${suffix}.${ext}`;
+  }
+
+  private triggerDownload(blob: Blob, filename: string): void {
+    const url = URL.createObjectURL(blob);
+    this.liveObjectUrls.add(url);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Revoke on next tick so the download has a chance to start (Chromium quirk).
+    window.setTimeout(() => {
+      URL.revokeObjectURL(url);
+      this.liveObjectUrls.delete(url);
+    }, 1000);
+  }
+
+  /**
+   * Determine the intrinsic pixel size of the SVG for PNG canvas sizing.
+   * Falls back through viewBox → getBBox() → getBoundingClientRect() → a
+   * hardcoded default, so a PNG export always has a valid non-zero size.
+   */
+  private intrinsicSize(svg: SVGElement): { width: number; height: number } {
+    // 1) viewBox (most reliable; renderer emits it).
+    const vb = svg.getAttribute("viewBox");
+    if (vb) {
+      const parts = vb.split(/[\s,]+/).map(Number);
+      if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
+        return { width: parts[2], height: parts[3] };
+      }
+    }
+    // 2) getBBox() — requires the element to be in the live DOM (it is: it's in stageEl).
+    try {
+      const bb = (svg as unknown as SVGGraphicsElement).getBBox();
+      if (bb.width > 0 && bb.height > 0) {
+        return { width: Math.ceil(bb.width), height: Math.ceil(bb.height) };
+      }
+    } catch {
+      /* getBBox can throw if not rendered; fall through */
+    }
+    // 3) Rendered client rect of the SVG element.
+    const r = svg.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) {
+      return { width: Math.ceil(r.width), height: Math.ceil(r.height) };
+    }
+    // 4) Last-resort default.
+    return { width: 800, height: 600 };
+  }
+
+  /** Serialize `this.svgClone` (un-zoomed — transform lives on the ancestor stage, not the SVG). */
+  private serializeSvg(): { xml: string; width: number; height: number } {
+    const svg = this.svgClone;
+    // Ensure namespaces for a valid standalone file.
+    if (!svg.getAttribute("xmlns")) svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    if (!svg.getAttribute("xmlns:xlink")) svg.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+
+    const { width, height } = this.intrinsicSize(svg);
+    const xml = new XMLSerializer().serializeToString(svg);
+    return { xml, width, height };
+  }
+
+  private downloadSvg(): void {
+    const { xml } = this.serializeSvg();
+    const doc = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n${xml}`;
+    const blob = new Blob([doc], { type: "image/svg+xml;charset=utf-8" });
+    this.triggerDownload(blob, this.nextFileName("svg"));
+  }
+
+  private downloadPng(): void {
+    // Determine intrinsic size from the on-screen clone, but rasterize from a
+    // *separate* clone that carries explicit width/height attributes — some
+    // Chromium builds rasterize an <img> at 0×0 if the SVG lacks them. The
+    // on-screen svgClone (and the plain .svg export) stays untouched.
+    const { width, height } = this.intrinsicSize(this.svgClone);
+    const pngSvg = this.svgClone.cloneNode(true) as SVGElement;
+    if (!pngSvg.getAttribute("xmlns")) pngSvg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    if (!pngSvg.getAttribute("xmlns:xlink"))
+      pngSvg.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+    pngSvg.setAttribute("width", String(width));
+    pngSvg.setAttribute("height", String(height));
+    const xml = new XMLSerializer().serializeToString(pngSvg);
+
+    // Cap raster dimensions so a huge diagram × DPR can't blow past canvas limits.
+    const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
+    const MAX_CANVAS_PX = 8192; // conservative cross-platform max canvas edge
+    let scale = dpr;
+    if (width * scale > MAX_CANVAS_PX || height * scale > MAX_CANVAS_PX) {
+      scale = Math.min(MAX_CANVAS_PX / width, MAX_CANVAS_PX / height);
+    }
+    const canvasW = Math.max(1, Math.round(width * scale));
+    const canvasH = Math.max(1, Math.round(height * scale));
+
+    // Blob URL keeps the canvas same-origin → toBlob() won't throw SecurityError.
+    const svgBlob = new Blob([xml], { type: "image/svg+xml;charset=utf-8" });
+    const svgUrl = URL.createObjectURL(svgBlob);
+    this.liveObjectUrls.add(svgUrl);
+
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = canvasW;
+        canvas.height = canvasH;
+        const cctx = canvas.getContext("2d");
+        if (!cctx) throw new Error("2D canvas context unavailable");
+        // White/theme background so transparent SVGs aren't black in some viewers.
+        cctx.fillStyle =
+          getComputedStyle(this.contentEl).getPropertyValue("--background-primary").trim() ||
+          "#ffffff";
+        cctx.fillRect(0, 0, canvasW, canvasH);
+        cctx.drawImage(img, 0, 0, canvasW, canvasH);
+        canvas.toBlob((pngBlob) => {
+          if (pngBlob) this.triggerDownload(pngBlob, this.nextFileName("png"));
+          URL.revokeObjectURL(svgUrl);
+          this.liveObjectUrls.delete(svgUrl);
+        }, "image/png");
+      } catch (err) {
+        URL.revokeObjectURL(svgUrl);
+        this.liveObjectUrls.delete(svgUrl);
+        console.error("kUML PNG export failed:", err);
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(svgUrl);
+      this.liveObjectUrls.delete(svgUrl);
+      console.error("kUML PNG export: SVG failed to load into Image");
+    };
+    img.src = svgUrl;
   }
 }
 
@@ -183,7 +542,13 @@ export default class KumlPlugin extends Plugin {
       if (svgEl) {
         container.addClass("kuml-diagram--zoomable");
         container.addEventListener("click", () => {
-          new KumlZoomModal(this.app, svgEl).open();
+          const raw = this.app.workspace.getActiveFile()?.basename ?? "kuml-diagram";
+          const safe =
+            raw
+              .replace(/[^\p{L}\p{N}\-_ ]/gu, "")
+              .trim()
+              .replace(/\s+/g, "-") || "kuml-diagram";
+          new KumlZoomModal(this.app, svgEl, safe).open();
         });
       }
     } catch (err: unknown) {

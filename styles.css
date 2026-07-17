@@ -87,21 +87,120 @@
   max-width: min(92vw, 1800px);
 }
 
-/* Scrollable content area — SVG is never clipped, just scrolled if needed. */
+/* Modal content is a vertical stack: toolbar on top, viewport below. */
 .kuml-zoom-content {
-  overflow: auto;
-  padding: 0.5em;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  padding: 0;
+  gap: 0;
+  /* Cap overall height so the toolbar + viewport fit; close button stays reachable. */
+  max-height: 88vh;
 }
 
-/* SVG fills the modal width; height is proportional, capped at ~85 % of the
-   viewport so the modal close button remains reachable. */
-.kuml-zoom-content svg {
+/* Sticky toolbar bar. */
+.kuml-zoom-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
+  padding: 0.4em 0.6em;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  /* Leave room on the right for Obsidian's absolute-positioned close button. */
+  padding-right: 2.5em;
+}
+
+.kuml-zoom-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-normal);
+  cursor: pointer;
+}
+.kuml-zoom-btn:hover {
+  background: var(--background-modifier-hover);
+}
+.kuml-zoom-btn:active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+.kuml-zoom-btn .svg-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.kuml-zoom-toolbar-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 0.25em;
+  background: var(--background-modifier-border);
+}
+
+/* Viewport clips the transformed stage; it is the pan/zoom surface. It stays
+   a plain block box (not flex) so its content-box top-left corner is a
+   stable reference frame for the zoom/pan pivot math in applyTransform()/
+   zoomTo(), which assumes the untransformed stage sits at translate(0,0)
+   relative to the viewport's own top-left. */
+.kuml-zoom-viewport {
+  position: relative;
+  flex: 1 1 auto;
+  overflow: hidden; /* while zoomed-in, JS transform handles pan; no native scroll */
+  min-height: 0; /* allow flex child to shrink */
+  background: var(--background-primary);
+  cursor: default;
+  /* Default: allow native touch scroll/pinch. This keeps the
+     `:not(.kuml-zoom-pannable) { overflow: auto }` fallback below reachable
+     on touch devices too (a tall diagram can overflow the viewport even at
+     fit level). Only once the user has zoomed past fit do we opt back into
+     touch-action: none so JS-driven drag-to-pan (see handlePointerDown) owns
+     the gesture without fighting native scrolling — see the
+     `.kuml-zoom-pannable` override just below. */
+  touch-action: pan-x pan-y;
+}
+/* Grab cursor only when zoomed past fit; JS pointer handlers own panning. */
+.kuml-zoom-viewport.kuml-zoom-pannable {
+  cursor: grab;
+  touch-action: none;
+}
+.kuml-zoom-viewport.kuml-zoom-panning {
+  cursor: grabbing;
+}
+/* At/under fit level JS panning is disabled (see handlePointerDown's scale
+   guard), so fall back to native scrolling instead of silently clipping
+   content that is still taller than the viewport (e.g. a very tall diagram
+   whose max-height cap below still exceeds the available viewport height). */
+.kuml-zoom-viewport:not(.kuml-zoom-pannable) {
+  overflow: auto;
+}
+
+/* Stage is the transform target and fills the viewport's full width (so its
+   own top-left stays pinned to the viewport's top-left — required by the
+   zoom/pan pivot math). It centers the SVG horizontally within itself,
+   mirroring the pre-toolbar lightbox's `.kuml-zoom-content { justify-content:
+   center }` so a letterboxed (max-height-capped) diagram isn't left-aligned. */
+.kuml-zoom-stage {
+  display: flex;
+  justify-content: center;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+/* At scale 1 (fit) the SVG scales up to the viewport width but is capped by
+   max-height so tall diagrams letterbox/contain-fit instead of overflowing
+   unconstrained — matches the pre-toolbar lightbox's default behaviour. */
+.kuml-zoom-svg {
+  display: block;
   width: 100%;
   height: auto;
   max-height: 85vh;
-  display: block;
 }
 
 /* ── Syntax highlighting for ```kuml code fences (V0.2.0) ─────────────────── */
