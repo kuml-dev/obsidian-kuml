@@ -140,6 +140,17 @@ class KumlZoomModal extends Modal {
     this.modalEl.addClass("kuml-zoom-modal");
     this.contentEl.addClass("kuml-zoom-content");
 
+    // Force the fixed 80% size via inline style too, not just the
+    // .kuml-zoom-modal.modal stylesheet rule. Obsidian's own modal
+    // positioning can set inline width/height/transform on modalEl, which
+    // would silently beat a plain stylesheet rule — leaving the modal at
+    // whatever size Obsidian picked, and every zoomFit() measurement (see
+    // below and the "Fit" button) wrong as a result.
+    this.modalEl.style.width = "80vw";
+    this.modalEl.style.height = "80vh";
+    this.modalEl.style.maxWidth = "80vw";
+    this.modalEl.style.maxHeight = "80vh";
+
     // Toolbar (sticky top bar).
     this.toolbarEl = this.contentEl.createDiv({ cls: "kuml-zoom-toolbar" });
     this.buildToolbar();
@@ -175,8 +186,12 @@ class KumlZoomModal extends Modal {
     this.viewportEl.addEventListener("pointerup", this.onPointerUpBound);
     this.viewportEl.addEventListener("pointercancel", this.onPointerUpBound);
 
-    // Start at fit.
-    this.zoomFit();
+    // Start at fit. Deferred one frame: right after opening, the modal may
+    // not have settled into its final layout yet (Obsidian's own open/centre
+    // positioning, or this plugin's own stylesheet not yet applied), so
+    // viewportEl.getBoundingClientRect() inside zoomFit() isn't reliable in
+    // this exact synchronous tick.
+    requestAnimationFrame(() => this.zoomFit());
   }
 
   onClose(): void {
