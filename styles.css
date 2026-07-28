@@ -179,10 +179,9 @@
   cursor: grabbing;
 }
 /* At/under fit level JS panning is disabled (see handlePointerDown's scale
-   guard), so fall back to native scrolling instead of silently clipping
-   content that is still bigger than the viewport — e.g. a huge diagram whose
-   MIN_FIT_SCALE legibility floor (see KumlZoomModal.zoomFit()) keeps it
-   larger than the viewport can show at once. */
+   guard). zoomFit() always computes a true contain-fit, so this shouldn't be
+   reachable in practice — kept as a defensive fallback against silently
+   clipping content instead of at least letting it scroll. */
 .kuml-zoom-viewport:not(.kuml-zoom-pannable) {
   overflow: auto;
 }
@@ -202,8 +201,8 @@
 /* Sized explicitly to its native pixel size (from viewBox) by
    KumlZoomModal.onOpen()/intrinsicSize() — all zoom/pan scaling then happens
    via the .kuml-zoom-stage transform (see zoomFit()), which computes an
-   explicit contain-fit scale with a legibility floor instead of relying on
-   an unconstrained CSS width:100%. */
+   explicit contain-fit scale instead of relying on an unconstrained CSS
+   width:100%. */
 .kuml-zoom-svg {
   display: block;
 }

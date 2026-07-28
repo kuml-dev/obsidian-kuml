@@ -88,8 +88,8 @@ class KumlZoomModal extends Modal {
 
   // ── Zoom/pan state ────────────────────────────────────────────────────
   private scale = 1; // current absolute zoom factor (1 == SVG native pixel size)
-  // The scale zoomFit() lands on — the "at rest" baseline. Not always 1: see
-  // zoomFit()'s MIN_FIT_SCALE floor and its scale-up-small-diagrams behaviour.
+  // The scale zoomFit() lands on — the "at rest" baseline (a true contain-fit:
+  // the whole diagram always visible, however small that makes its text).
   // canPan/reset comparisons are relative to this, not to a hardcoded 1.
   private fitScale = 1;
   private nativeWidth = 0; // SVG's own viewBox width in px, set once in onOpen()
@@ -102,15 +102,12 @@ class KumlZoomModal extends Modal {
   private panOriginX = 0; // translateX at drag start
   private panOriginY = 0;
 
+  // Manual zoom-out floor for typical diagrams — see clampScale(), which
+  // relaxes this below fitScale for a diagram huge enough that "Fit" itself
+  // needed to go smaller.
   private readonly MIN_SCALE = 0.25;
   private readonly MAX_SCALE = 4;
   private readonly ZOOM_STEP = 1.2; // multiplicative per button click / wheel notch
-  // zoomFit() never auto-shrinks a diagram past this fraction of its native
-  // size — a huge diagram would otherwise squeeze its text below legibility
-  // just to fit the viewport. Below this floor the diagram overflows the
-  // viewport instead (pan/scroll fallback already in place); small diagrams
-  // still scale *up* to fill the viewport as before, unaffected by this floor.
-  private readonly MIN_FIT_SCALE = 0.6;
 
   // ── DOM refs ──────────────────────────────────────────────────────────
   private viewportEl!: HTMLDivElement; // clips + is the pan surface (overflow:hidden)
@@ -171,8 +168,7 @@ class KumlZoomModal extends Modal {
     // auto-sizing — some Chromium builds size a <svg> with no explicit
     // width/height inconsistently (see downloadPng()'s pngSvg clone for the
     // same defensive pattern). This also lets zoomFit() compute an explicit
-    // contain-fit scale with a legibility floor instead of an unconstrained
-    // CSS width:100%.
+    // contain-fit scale instead of an unconstrained CSS width:100%.
     const native = this.intrinsicSize(this.svgClone);
     this.nativeWidth = native.width;
     this.nativeHeight = native.height;
@@ -262,7 +258,13 @@ class KumlZoomModal extends Modal {
   }
 
   private clampScale(s: number): number {
-    return Math.min(this.MAX_SCALE, Math.max(this.MIN_SCALE, s));
+    // The lower bound is never more restrictive than the current fitScale —
+    // a diagram so huge that zoomFit() had to go below MIN_SCALE to show it
+    // completely must stay fully reachable via manual zoom-out too, instead
+    // of manual zoom snapping back in to MIN_SCALE (a jarring inconsistency
+    // with what "Fit" just showed).
+    const lowerBound = Math.min(this.MIN_SCALE, this.fitScale);
+    return Math.min(this.MAX_SCALE, Math.max(lowerBound, s));
   }
 
   private zoomTo(newScale: number, pivotClientX?: number, pivotClientY?: number): void {
@@ -299,15 +301,22 @@ class KumlZoomModal extends Modal {
     // actual pixel box — the viewport itself is now a fixed ~80% of the
     // Obsidian window (see styles.css), not content-driven, so this is a
     // real "does it fit" computation rather than an implicit CSS width:100%.
+    // Always the *whole* diagram, however small that makes its text — a
+    // legibility floor here would mean "Fit" no longer fits (a very tall or
+    // wide diagram would overflow the viewport instead of being fully
+    // visible), which defeats the button's one job. Manual zoom-in (+, wheel,
+    // pinch) is how a user reads fine detail in a diagram this shrunk, same
+    // as any other fit-to-window tool.
     const rect = this.viewportEl.getBoundingClientRect();
     const containScale =
       rect.width > 0 && rect.height > 0 && this.nativeWidth > 0 && this.nativeHeight > 0
         ? Math.min(rect.width / this.nativeWidth, rect.height / this.nativeHeight)
         : 1;
-    // Never auto-shrink past MIN_FIT_SCALE: a huge diagram would otherwise be
-    // squeezed down until its text is illegible. Small diagrams still scale
-    // *up* to fill the viewport, unaffected by this floor.
-    this.fitScale = this.clampScale(Math.max(containScale, this.MIN_FIT_SCALE));
+    // Deliberately not clampScale() here — that floors at MIN_SCALE, which
+    // would reintroduce the "Fit doesn't actually fit" bug for huge diagrams.
+    // Only cap the upper end, so a tiny diagram doesn't scale up past what
+    // manual zoom-in itself allows.
+    this.fitScale = Math.min(this.MAX_SCALE, containScale);
     this.scale = this.fitScale;
     this.translateX = 0;
     this.translateY = 0;
@@ -315,11 +324,10 @@ class KumlZoomModal extends Modal {
   }
 
   private handleWheel(e: WheelEvent): void {
-    // At/under fit level (not pannable) the viewport may still genuinely
-    // overflow — e.g. a diagram whose MIN_FIT_SCALE floor kept it larger than
-    // the viewport. styles.css falls back to native `overflow: auto`
-    // scrolling for exactly that case
-    // (`.kuml-zoom-viewport:not(.kuml-zoom-pannable)`), but that fallback is
+    // At/under fit level (not pannable) the viewport could in principle still
+    // overflow — zoomFit() always computes a true contain-fit now, so this
+    // should be rare, but styles.css keeps a native `overflow: auto` fallback
+    // for it anyway (`.kuml-zoom-viewport:not(.kuml-zoom-pannable)`), which is
     // unreachable if we unconditionally hijack every wheel notch for zoom.
     // So: when not zoomed past fit AND there's real overflow to scroll,
     // let the wheel event scroll natively instead of zooming — unless the
