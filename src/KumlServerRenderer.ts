@@ -6,7 +6,8 @@ import { requestUrl, RequestUrlResponse } from "obsidian";
  * API contract (verified against kuml-web/src/main/resources/web/static/app.js):
  *   POST /api/render
  *   Content-Type: application/json
- *   Body: { script: string, format: "svg"|"png"|"latex", theme: string, layout: string }
+ *   Body: { script: string, format: "svg"|"png"|"latex", theme: string, layout: string,
+ *           watermark?: boolean }
  *
  * Response (JSON):
  *   { ok: boolean, format: string, svg: string|null, pngBase64: string|null,
@@ -48,7 +49,11 @@ function isRenderResponse(v: JsonValue): v is RenderResponse & JsonValue {
   );
 }
 
-export async function renderViaServer(source: string, serverUrl: string): Promise<string> {
+export async function renderViaServer(
+  source: string,
+  serverUrl: string,
+  watermark?: boolean,
+): Promise<string> {
   // Build a manual abort timer using `window.setTimeout` (popout-safe). Obsidian's
   // requestUrl doesn't support AbortSignal, so we race it against a timeout.
   let timeoutHandle: number | undefined;
@@ -71,6 +76,7 @@ export async function renderViaServer(source: string, serverUrl: string): Promis
           format: "svg",
           theme: "kuml",
           layout: "auto",
+          watermark: watermark ?? false,
         }),
         // We handle non-2xx ourselves so the error includes the body text.
         throw: false,

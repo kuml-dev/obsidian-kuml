@@ -77,5 +77,21 @@ export class KumlSettingsTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           })
       );
+
+    // ── Watermark ──────────────────────────────────────────────────────────────
+    new Setting(containerEl)
+      .setName("Show kUML watermark")
+      .setDesc(
+        "Adds a small 'Powered by kUML' label inside the diagram frame. " +
+        "Off by default; has no effect on Blueprint/journey-map diagrams."
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.showWatermark)
+          .onChange(async (value) => {
+            this.plugin.settings.showWatermark = value;
+            await this.plugin.saveSettings();
+          })
+      );
   }
 }

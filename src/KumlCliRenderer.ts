@@ -39,13 +39,15 @@ export interface AnimatedRenderOptions {
  *
  * Strategy (avoids /dev/stdout which Electron child processes cannot open):
  *   1. Write source to  /tmp/kuml-obsidian-<ts>-<seq>-in.kuml.kts
- *   2. Run: kuml render --format svg [--animated [--trace <path>]]
+ *   2. Run: kuml render --format svg [--animated [--trace <path>]] [--watermark]
  *           -o /tmp/kuml-obsidian-<ts>-<seq>-out.svg <inFile>
  *   3. Read the output file → return SVG string
  *   4. Delete both temp files (best-effort)
  *
  * Stderr (JNA / Unsafe warnings) is filtered before showing errors to the user.
  *
+ * V0.6.0 — added `watermark` param (plugin setting "Show kUML watermark"),
+ *   passed through as the CLI's `--watermark` flag.
  * V0.3.0 — added `animatedOptions` for kuml-animated code fence support.
  * V0.2.5 — reverted dynamic import() back to require()-based loading.
  */
@@ -53,6 +55,7 @@ export async function renderViaCli(
   source: string,
   cliPath: string,
   animatedOptions?: AnimatedRenderOptions,
+  watermark?: boolean,
 ): Promise<string> {
   if (!Platform.isDesktopApp) {
     throw new Error("CLI rendering is only available on desktop. Use server mode for mobile.");
@@ -85,13 +88,16 @@ export async function renderViaCli(
     throw new Error(`kuml CLI: could not write temp file: ${msg}`);
   }
 
-  // Build CLI argument list — base args + optional animated flags
+  // Build CLI argument list — base args + optional animated/watermark flags
   const cliArgs = ["render", "--format", "svg"];
   if (animatedOptions?.animated) {
     cliArgs.push("--animated");
     if (animatedOptions.tracePath) {
       cliArgs.push(`--trace=${animatedOptions.tracePath}`);
     }
+  }
+  if (watermark) {
+    cliArgs.push("--watermark");
   }
   cliArgs.push("-o", outFile, inFile);
 
